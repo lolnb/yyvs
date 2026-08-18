@@ -18,9 +18,6 @@ export const metadata: Metadata = {
   title: "yyvs",
   description: "yyvs.com",
   applicationName: "yyvs",
-  icons: {
-    icon: "/favicon.ico",
-  },
   openGraph: {
     title: "yyvs",
     description: "yyvs.com",
