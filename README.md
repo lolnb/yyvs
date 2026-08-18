@@ -1,6 +1,6 @@
-# yyvs
+# YYVS
 
-yyvs.com 的官网页面：全屏 Siri 风格 WebGL 波形动画，适配电脑和手机。
+YYVS 官网当前是一个极简全屏页面，仅展示原版 Spline 机器人模型。
 
 ## 本地开发
 
@@ -9,9 +9,9 @@ npm install
 npm run dev
 ```
 
-打开 [http://localhost:3000](http://localhost:3000) 查看。
+访问 `http://localhost:3000`。
 
-## 构建部署
+## 生产构建
 
 ```bash
 npm run build
