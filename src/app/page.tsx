@@ -8,16 +8,18 @@ export default function Home() {
 
   useEffect(() => {
     let rafId = 0
-    let retryTimeoutId = 0
+    let swipeRafId = 0
+    let swipeTimeoutId = 0
     let attempts = 0
-    let triggeredCount = 0
+    let sequenceRan = false
+
+    const getCanvas = () => rootRef.current?.querySelector("canvas") ?? null
 
     const dispatchCenterTap = () => {
-      const root = rootRef.current
-      const canvas = root?.querySelector("canvas")
-      if (!root || !canvas) return false
+      const canvas = getCanvas()
+      if (!canvas) return false
 
-      const rect = root.getBoundingClientRect()
+      const rect = canvas.getBoundingClientRect()
       const clientX = rect.left + rect.width / 2
       const clientY = rect.top + rect.height / 2
 
@@ -42,30 +44,101 @@ export default function Home() {
       return true
     }
 
-    const triggerCenterTap = () => {
-      if (triggeredCount > 0) return
-      attempts += 1
+    const dispatchCenterSlightUpSwipe = () => {
+      const canvas = getCanvas()
+      if (!canvas) return
 
-      if (!dispatchCenterTap()) {
-        if (attempts < 120) {
-          rafId = requestAnimationFrame(triggerCenterTap)
-        }
-        return
+      const rect = canvas.getBoundingClientRect()
+      const startX = rect.left + rect.width / 2
+      const startY = rect.top + rect.height / 2
+      const endY = startY - Math.min(rect.height * 0.045, 24)
+
+      const pointerInitBase: Omit<PointerEventInit, "clientX" | "clientY"> = {
+        bubbles: true,
+        cancelable: true,
+        pointerType: "touch",
       }
-      triggeredCount = 1
 
-      // Slow-loading fallback: fire a second center tap shortly after first paint.
-      retryTimeoutId = window.setTimeout(() => {
-        if (triggeredCount < 2 && dispatchCenterTap()) {
-          triggeredCount = 2
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          ...pointerInitBase,
+          clientX: startX,
+          clientY: startY,
+        }),
+      )
+
+      const startTime = performance.now()
+      const durationMs = 460
+
+      const animateSwipe = () => {
+        const elapsed = performance.now() - startTime
+        const t = Math.min(elapsed / durationMs, 1)
+        const eased = 1 - Math.pow(1 - t, 3)
+        const clientY = startY + (endY - startY) * eased
+
+        canvas.dispatchEvent(
+          new PointerEvent("pointermove", {
+            ...pointerInitBase,
+            clientX: startX,
+            clientY,
+          }),
+        )
+        canvas.dispatchEvent(
+          new MouseEvent("mousemove", {
+            bubbles: true,
+            cancelable: true,
+            clientX: startX,
+            clientY,
+          }),
+        )
+
+        if (t < 1) {
+          swipeRafId = requestAnimationFrame(animateSwipe)
+          return
         }
-      }, 900)
+
+        canvas.dispatchEvent(
+          new PointerEvent("pointerup", {
+            ...pointerInitBase,
+            clientX: startX,
+            clientY: endY,
+          }),
+        )
+      }
+
+      swipeRafId = requestAnimationFrame(animateSwipe)
     }
 
-    rafId = requestAnimationFrame(triggerCenterTap)
+    const runIntroSequence = () => {
+      if (sequenceRan) return
+      if (!dispatchCenterTap()) return
+
+      sequenceRan = true
+      swipeTimeoutId = window.setTimeout(() => {
+        dispatchCenterSlightUpSwipe()
+      }, 260)
+    }
+
+    const waitForCanvasAndRun = () => {
+      if (sequenceRan) return
+      attempts += 1
+
+      if (getCanvas()) {
+        runIntroSequence()
+        return
+      }
+
+      if (attempts < 180) {
+        rafId = requestAnimationFrame(waitForCanvasAndRun)
+      }
+    }
+
+    rafId = requestAnimationFrame(waitForCanvasAndRun)
+
     return () => {
       cancelAnimationFrame(rafId)
-      window.clearTimeout(retryTimeoutId)
+      cancelAnimationFrame(swipeRafId)
+      window.clearTimeout(swipeTimeoutId)
     }
   }, [])
 
