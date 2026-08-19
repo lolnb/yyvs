@@ -20,47 +20,60 @@ export default function Home() {
   const userTouchedRef = useRef(false)
   const swipeRafRef = useRef(0)
   const appRef = useRef<Application | null>(null)
+  const eyeVideosRef = useRef<HTMLVideoElement[]>([])
   const swipePointerRef = useRef<{
     canvas: HTMLCanvasElement
     clientX: number
     clientY: number
   } | null>(null)
 
-  const playEyeVideos = useCallback((app: Application) => {
+  const collectEyeVideos = useCallback((app: Application) => {
     const videos = new Set<HTMLVideoElement>()
-
     const addVideo = (value: unknown) => {
       if (value instanceof HTMLVideoElement) videos.add(value)
     }
 
-    const inspect = (value: unknown, depth = 0) => {
-      if (!value || depth > 8) return
-      addVideo(value)
-      if (typeof value !== "object") return
-      if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return
-      if (value instanceof Node && !(value instanceof HTMLVideoElement)) return
-
-      const record = value as Record<string, unknown>
-      addVideo(record.img)
-      addVideo(record.videoElement)
-      addVideo(record.image)
-      inspect(record.material, depth + 1)
-      inspect(record.color, depth + 1)
-      inspect(record.texture, depth + 1)
-      inspect(record.layers, depth + 1)
-      if (Array.isArray(value) && value.length < 40) {
-        for (const item of value) inspect(item, depth + 1)
+    const walkMaterial = (material: unknown) => {
+      const materials = Array.isArray(material) ? material : [material]
+      for (const mat of materials) {
+        if (!mat || typeof mat !== "object") continue
+        const layers = (mat as { layers?: unknown[] }).layers
+        if (!Array.isArray(layers)) continue
+        for (const layer of layers) {
+          const image = (
+            layer as {
+              color?: { texture?: { image?: { img?: unknown } | unknown } }
+            }
+          )?.color?.texture?.image
+          addVideo(image)
+          addVideo((image as { img?: unknown } | undefined)?.img)
+        }
       }
     }
 
-    for (const obj of app.getAllObjects()) {
-      inspect(obj)
-      inspect(obj.material)
+    const visit = (object: { material?: unknown; videoElement?: unknown }) => {
+      addVideo(object?.videoElement)
+      walkMaterial(object?.material)
     }
 
-    for (const video of document.querySelectorAll("video")) {
-      videos.add(video)
-    }
+    const scene = (app as Application & {
+      _scene?: {
+        traverseEntity?: (cb: (object: { material?: unknown }) => void) => void
+        traverse?: (cb: (object: { material?: unknown }) => void) => void
+      }
+    })._scene
+    scene?.traverseEntity?.(visit)
+    scene?.traverse?.(visit)
+    for (const obj of app.getAllObjects()) visit(obj)
+    for (const video of document.querySelectorAll("video")) videos.add(video)
+
+    eyeVideosRef.current = [...videos]
+    return eyeVideosRef.current
+  }, [])
+
+  const playEyeVideos = useCallback((app?: Application | null) => {
+    const source = app ?? appRef.current
+    const videos = source ? collectEyeVideos(source) : eyeVideosRef.current
 
     for (const video of videos) {
       video.muted = true
@@ -70,9 +83,10 @@ export default function Home() {
       video.setAttribute("playsinline", "true")
       video.setAttribute("webkit-playsinline", "true")
       video.setAttribute("x5-playsinline", "true")
+      video.setAttribute("x5-video-player-type", "h5")
       void video.play().catch(() => {})
     }
-  }, [])
+  }, [collectEyeVideos])
 
   const openEyes = useCallback(
     (app: Application) => {
@@ -216,13 +230,18 @@ export default function Home() {
         if ("isTrusted" in event && event.isTrusted === false) return
         userTouchedRef.current = true
         releaseSwipePointer()
-        // WeChat requires a real user gesture to start the eye video.
+        // Must run synchronously inside the gesture. WeChat/iOS will not
+        // start the eye video from a delayed or synthetic click.
         playEyeVideos(app)
       }
       canvas.addEventListener("pointerdown", onFirstRealTouch, {
         capture: true,
       })
       canvas.addEventListener("touchstart", onFirstRealTouch, {
+        capture: true,
+        passive: true,
+      })
+      window.addEventListener("touchstart", onFirstRealTouch, {
         capture: true,
         passive: true,
       })
@@ -239,7 +258,7 @@ export default function Home() {
 
   return (
     <main ref={rootRef} className="h-dvh w-full overflow-hidden bg-black">
-      <div className="h-full w-[calc(100%+30px)]">
+      <div className="h-full w-[calc(100%+26px)]">
         <SplineScene
           scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
           className="h-full w-full"
