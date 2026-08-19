@@ -1,152 +1,128 @@
 'use client'
 
-import { useEffect, useRef } from "react"
+import { useCallback, useRef } from "react"
+import type { Application } from "@splinetool/runtime"
 import { SplineScene } from "@/components/ui/splite"
+
+const EYE_EVENT_OBJECTS = ["Head", "Head 2", "Body"] as const
 
 export default function Home() {
   const rootRef = useRef<HTMLElement | null>(null)
+  const userTouchedRef = useRef(false)
+  const swipeRafRef = useRef(0)
 
-  useEffect(() => {
-    let rafId = 0
-    let swipeRafId = 0
-    let swipeTimeoutId = 0
-    let attempts = 0
-    let sequenceRan = false
-
-    const getCanvas = () => rootRef.current?.querySelector("canvas") ?? null
-
-    const dispatchCenterTap = () => {
-      const canvas = getCanvas()
-      if (!canvas) return false
-
-      const rect = canvas.getBoundingClientRect()
-      const clientX = rect.left + rect.width / 2
-      const clientY = rect.top + rect.height / 2
-
-      const pointerInit: PointerEventInit = {
-        bubbles: true,
-        cancelable: true,
-        pointerType: "touch",
-        clientX,
-        clientY,
+  const openEyes = useCallback((app: Application) => {
+    for (const name of EYE_EVENT_OBJECTS) {
+      try {
+        app.emitEvent("mouseDown", name)
+        app.emitEvent("mouseUp", name)
+      } catch {
+        // Object may not exist or may not have this event.
       }
+    }
+  }, [])
 
-      canvas.dispatchEvent(new PointerEvent("pointerdown", pointerInit))
-      canvas.dispatchEvent(new PointerEvent("pointerup", pointerInit))
+  const dispatchCenterSlightUpSwipe = useCallback(() => {
+    const canvas = rootRef.current?.querySelector("canvas")
+    if (!canvas || userTouchedRef.current) return
+
+    const rect = canvas.getBoundingClientRect()
+    const startX = rect.left + rect.width / 2
+    const startY = rect.top + rect.height / 2
+    const endY = startY - Math.min(rect.height * 0.045, 24)
+
+    const pointerInitBase: Omit<PointerEventInit, "clientX" | "clientY"> = {
+      bubbles: true,
+      cancelable: true,
+      pointerType: "touch",
+    }
+
+    canvas.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        ...pointerInitBase,
+        clientX: startX,
+        clientY: startY,
+      }),
+    )
+
+    const startTime = performance.now()
+    const durationMs = 460
+
+    const animateSwipe = () => {
+      if (userTouchedRef.current) return
+
+      const elapsed = performance.now() - startTime
+      const t = Math.min(elapsed / durationMs, 1)
+      const eased = 1 - Math.pow(1 - t, 3)
+      const clientY = startY + (endY - startY) * eased
+
       canvas.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          clientX,
+        new PointerEvent("pointermove", {
+          ...pointerInitBase,
+          clientX: startX,
           clientY,
         }),
       )
-      return true
-    }
-
-    const dispatchCenterSlightUpSwipe = () => {
-      const canvas = getCanvas()
-      if (!canvas) return
-
-      const rect = canvas.getBoundingClientRect()
-      const startX = rect.left + rect.width / 2
-      const startY = rect.top + rect.height / 2
-      const endY = startY - Math.min(rect.height * 0.045, 24)
-
-      const pointerInitBase: Omit<PointerEventInit, "clientX" | "clientY"> = {
-        bubbles: true,
-        cancelable: true,
-        pointerType: "touch",
-      }
-
       canvas.dispatchEvent(
-        new PointerEvent("pointerdown", {
-          ...pointerInitBase,
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
           clientX: startX,
-          clientY: startY,
+          clientY,
         }),
       )
 
-      const startTime = performance.now()
-      const durationMs = 460
-
-      const animateSwipe = () => {
-        const elapsed = performance.now() - startTime
-        const t = Math.min(elapsed / durationMs, 1)
-        const eased = 1 - Math.pow(1 - t, 3)
-        const clientY = startY + (endY - startY) * eased
-
-        canvas.dispatchEvent(
-          new PointerEvent("pointermove", {
-            ...pointerInitBase,
-            clientX: startX,
-            clientY,
-          }),
-        )
-        canvas.dispatchEvent(
-          new MouseEvent("mousemove", {
-            bubbles: true,
-            cancelable: true,
-            clientX: startX,
-            clientY,
-          }),
-        )
-
-        if (t < 1) {
-          swipeRafId = requestAnimationFrame(animateSwipe)
-          return
-        }
-
-        canvas.dispatchEvent(
-          new PointerEvent("pointerup", {
-            ...pointerInitBase,
-            clientX: startX,
-            clientY: endY,
-          }),
-        )
-      }
-
-      swipeRafId = requestAnimationFrame(animateSwipe)
-    }
-
-    const runIntroSequence = () => {
-      if (sequenceRan) return
-      if (!dispatchCenterTap()) return
-
-      sequenceRan = true
-      swipeTimeoutId = window.setTimeout(() => {
-        dispatchCenterSlightUpSwipe()
-      }, 260)
-    }
-
-    const waitForCanvasAndRun = () => {
-      if (sequenceRan) return
-      attempts += 1
-
-      if (getCanvas()) {
-        runIntroSequence()
+      if (t < 1) {
+        swipeRafRef.current = requestAnimationFrame(animateSwipe)
         return
       }
 
-      if (attempts < 180) {
-        rafId = requestAnimationFrame(waitForCanvasAndRun)
-      }
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          ...pointerInitBase,
+          clientX: startX,
+          clientY: endY,
+        }),
+      )
     }
 
-    rafId = requestAnimationFrame(waitForCanvasAndRun)
-
-    return () => {
-      cancelAnimationFrame(rafId)
-      cancelAnimationFrame(swipeRafId)
-      window.clearTimeout(swipeTimeoutId)
-    }
+    swipeRafRef.current = requestAnimationFrame(animateSwipe)
   }, [])
+
+  const handleLoad = useCallback(
+    (app: Application) => {
+      openEyes(app)
+      window.setTimeout(() => openEyes(app), 120)
+
+      const canvas = app.canvas
+      const onFirstTouch = () => {
+        userTouchedRef.current = true
+        cancelAnimationFrame(swipeRafRef.current)
+        openEyes(app)
+      }
+      canvas.addEventListener("pointerdown", onFirstTouch, {
+        capture: true,
+        once: true,
+      })
+      canvas.addEventListener("touchstart", onFirstTouch, {
+        capture: true,
+        passive: true,
+        once: true,
+      })
+
+      window.setTimeout(() => {
+        dispatchCenterSlightUpSwipe()
+      }, 280)
+    },
+    [dispatchCenterSlightUpSwipe, openEyes],
+  )
 
   return (
     <main ref={rootRef} className="h-dvh w-full overflow-hidden bg-black">
       <SplineScene
         scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
         className="h-full w-full"
+        onLoad={handleLoad}
       />
     </main>
   )
